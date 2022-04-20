@@ -70,8 +70,6 @@ dim(titanic_train)
 dim(titanic_test)
 
 
-
-
 sprintf("The sum of Na's in training data is %d", sum(is.na(titanic_train)))
 
 # na.omit()
@@ -91,11 +89,6 @@ Using the **training** data set, explore/describe the distribution of the outcom
 titanic_train <- training(titanic_split)
 
 
-ggcorr(titanic_train,
-       nbreaks = 6,
-       label = TRUE,
-       label_size = 3,
-       color = "grey50")
 
 
 ggplot(titanic_train, aes(x = survived)) +
@@ -114,6 +107,11 @@ Using the **training** data set, create a correlation matrix of all continuous v
 
 
 ```{r}
+ggcorr(titanic_train,
+       nbreaks = 6,
+       label = TRUE,
+       label_size = 3,
+       color = "grey50")
 
 ```
 
@@ -212,6 +210,25 @@ Prove that the inverse of a logistic function is indeed the *logit* function:
 $$
 z(p)=ln\left(\frac{p}{1-p}\right)
 $$
+
+$$
+p(z)=\frac{e^z}{1+e^z} \\
+p({1+e^z}) = e^z \\
+p\cdot 1 + p\cdot e^z = e^z  \\
+e^z - p\cdot e^z = p \\
+e^z \cdot (1-p) = p \\
+e^z = \frac{p}{1-p} \\
+z(p) = \log_e\left(\frac{p}{1-p}\right) \\
+z(p) = ln\left(\frac{p}{1-p}\right)
+
+$$
+  
+
+
+
+
+
+
 
 ### Question 12
 
