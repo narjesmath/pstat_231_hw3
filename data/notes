@@ -1,0 +1,3 @@
+titanic_train[rowSums(is.na(titanic_train)) <= 0,]
+
+# sprintf("The sum of Na's in training data is %d", sum(is.na(titanic_train)))

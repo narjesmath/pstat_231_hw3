@@ -1,11 +1,12 @@
 ---
-title: "Homework 3"
-author: "PSTAT 131/231"
+title: "Homework 3: Classification - Analysis of Titanic data"
+author: "Narjes Mathlouthi for PSTAT 131/231"
 output:
-    html_document:
-      toc: true
-      toc_float: true
+    html_document: 
+      toc: yes
+      toc_float: yes
       code_folding: show
+      fig_caption: yes
 ---
 
 ```{r setup, include=FALSE, message=FALSE, warning = FALSE}
@@ -14,13 +15,16 @@ knitr::opts_chunk$set(
 	message = FALSE,
 	warning = FALSE
 )
+library(tinytex)
 library(GGally)
 library(kableExtra)
+library(DataExplorer)
 library(here)
 library(tidymodels)
 library(ISLR)
 library(ISLR2)
 library(tidyverse)
+library(discrim) #lda
 tidymodels_prefer()
 ```
 
@@ -40,29 +44,32 @@ Make sure you load the `tidyverse` and `tidymodels`!
 
 ```{r, results='hide'}
 
-titanic <- tibble(read_csv(here("data", "titanic.csv"))) %>% 
+titanic_raw <- read_csv(here("data", "titanic.csv"))
+
+titanic <- titanic_raw %>% 
  mutate(pclass = as.factor(pclass)) %>% 
-  mutate(survived = as.factor(survived)) 
+  mutate(survived = as.factor(survived)) %>% 
+  mutate(ticket = as.numeric(ticket)) %>% 
+  select(-name) 
 
 titanic$survived <- recode_factor(titanic$survived, No = "yes", Yes = "no") 
 
-
-DataExplorer::plot_intro(titanic)
 ```
 
 ### Question 1
 
 Split the data, stratifying on the outcome variable, `survived.` You should choose the proportions to split the data into. Verify that the training and testing data sets have the appropriate number of observations. Take a look at the training data and note any potential issues, such as missing data.
 
-```{r}
+```{r, results='hide'}
 #set a seed before splitting to ensure that we can reproduce the results
 set.seed(3435)
 #Split the data, stratifying on the outcome variable, `survived.`
 titanic_split <- initial_split(titanic, strata =survived, prop = 0.7)
 
-
+#training set 
 titanic_train <- training(titanic_split)
 
+#testing set
 titanic_test <- testing(titanic_split)
 
 #Verify that the training and testing data sets have the appropriate number of observations
@@ -70,40 +77,57 @@ dim(titanic_train)
 dim(titanic_test)
 
 
-sprintf("The sum of Na's in training data is %d", sum(is.na(titanic_train)))
+#What does missing data look like in our training set
+#rowSums(is.na(titanic_train)) <= 0
 
-# na.omit()
 
 ```
+
+
+
 
 *Why is it a good idea to use stratified sampling for this data?*
 
 The `strata` argument makes sure that both sides of the split have roughly the same distribution for each value of strata. If a numeric variable is passed to `strata`, then it is binned and distributions are matched within bins.
 
-
 ### Question 2
 
 Using the **training** data set, explore/describe the distribution of the outcome variable `survived`.
 
-```{r}
+```{r, fig.tab="Figure 1.Overview of which columns contain missing data"}
 titanic_train <- training(titanic_split)
 
+#Looking at missing data 
+DataExplorer::plot_missing(
+  titanic_train,
+  group = list(Good = 0.05, OK = 0.4, Bad = 0.8, Remove = 1),
+  missing_only = FALSE,
+  geom_label_args = list(),
+  title = NULL,
+  ggtheme = theme_gray(),
+  theme_config = list(legend.position = c("bottom"))
+)
 
+```
 
+```{r}
 
 ggplot(titanic_train, aes(x = survived)) +
-  geom_bar(width=0.5, fill = "coral") +
+  geom_bar(width=0.5, fill = "blue", alpha= 0.3) +
   geom_text(stat='count', aes(label=stat(count)), vjust=-0.5) +
   theme_classic()
 
 
-
-
 ```
+
+- From **Figure1.** Graph of missing rows per variable, we can see that `survived` observations do not contain any **Na's**
+
+- From  **Figure2.** Graph depicting survival rates among Titanic passengers 
 
 ### Question 3
 
 Using the **training** data set, create a correlation matrix of all continuous variables. Create a visualization of the matrix, and describe any patterns you see. Are any predictors correlated with each other? Which ones, and in which direction?
+
 
 
 ```{r}
@@ -114,6 +138,12 @@ ggcorr(titanic_train,
        color = "grey50")
 
 ```
+
+**Figure3. Correlation Matrix**
+
+- # of siblings / spouses aboard the Titanic is correlated with # of parents / children aboard the Titanic
+- #Ticket vs. number of parents / children aboard the Titanic are correlated
+- age vs. # of siblings / spouses aboard the Titanic are negatively correlated 
 
 
 ### Question 4
@@ -127,8 +157,16 @@ Recall that there were missing values for `age`. To deal with this, add an imput
 
 You'll need to investigate the `tidymodels` documentation to find the appropriate step functions to use.
 
-```{r}
 
+
+
+```{r recipe}
+titanic_recipe <-
+  recipe(survived ~ pclass + ticket + age + sib_sp +parch +fare , data = titanic_train) %>% 
+  step_impute_linear() %>% 
+  step_dummy() %>% 
+  step_interact(~ sex:fare + age:fare) # because a*b would generate a + b + a:b step_interact takes care of the interaction only
+  
 ```
 
 ### Question 5
@@ -137,8 +175,54 @@ Specify a **logistic regression** model for classification using the `"glm"` eng
 
 ***Hint: Make sure to store the results of `fit()`. You'll need them later on.***
 
-```{r}
+```{r model glm specification}
+glm_spec <- logistic_reg() %>%
+  set_engine("glm")%>% 
+  set_mode("classification")
+```
 
+
+
+```{r workflow,echo=FALSE}
+glm_workflow <- workflow() %>%
+  add_recipe(titanic_recipe) %>%
+  add_model(glm_spec)
+
+log_fit <- fit(glm_workflow, titanic_train)
+# log_fit %>% 
+#   tidy()
+```
+### Assessing Model Performance
+
+We can use the model to generate probability predictions for the training data:
+
+```{r}
+predict(log_fit, new_data = titanic_train, type = "prob")
+```
+
+Each row represents the probability predicted by the model that a given observation belongs to a given class. Notice this is redundant, because one could be calculated directly from the other, but it's useful in multiclass situations.
+
+However, it's more useful to summarize the predicted values. We can use `augment()` to attach the predicted values to the daata, then generate a confusion matrix:
+
+```{r}
+augment(log_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class)
+```
+Or we can create a visual representation of the confusion matrix:
+
+```{r}
+augment(log_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+Let's calculate the accuracy of this model, or the average number of correct predictions it made on the **training** data. This is the model's **training error rate**.
+
+
+```{r}
+log_reg_acc <- augment(log_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+log_reg_acc
 ```
 
 
@@ -148,24 +232,129 @@ Specify a **logistic regression** model for classification using the `"glm"` eng
 
 ```{r}
 
+lda_mod <- discrim_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("MASS")
+
+lda_wkflow <- workflow() %>% 
+  add_model(lda_mod) %>% 
+  add_recipe(titanic_recipe) 
+
+lda_fit<-fit(lda_wkflow, titanic_train) #remove character 'name' and make tickert as numeric
+  
 ```
 
+
+### Assessing Performance
+
+This can be done almost exactly the same way:
+
+```{r}
+predict(lda_fit, new_data = titanic_train, type = "prob")
+```
+
+We can view a confidence matrix and calculate accuracy on the **training data**:
+
+```{r}
+augment(lda_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+```
+
+```{r}
+lda_acc <- augment(lda_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+lda_acc
+```
 
 ### Question 7
 
 **Repeat Question 5**, but this time specify a quadratic discriminant analysis model for classification using the `"MASS"` engine.
 
-```{r}
+```{r, echo= FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+discrim_regularized(frac_common_cov = 0, frac_identity = 0) %>% 
+  set_engine("klaR") %>% 
+  translate()
 
+quad_mod <- discrim_regularized(frac_common_cov = 0, frac_identity = 0) %>% 
+  set_engine("klaR") %>% 
+  set_mode("classification")
+  
+  quad_wkflow <- workflow() %>% 
+  add_model(quad_mod) %>% 
+  add_recipe(titanic_recipe) 
+
+qda_fit<-fit(quad_wkflow, titanic_train)
+  
 ```
+### Assessing Performance
+
+And again:
+
+```{r}
+predict(qda_fit, new_data = titanic_train, type = "prob")
+```
+
+We can view a confidence matrix and calculate accuracy on the **training data**:
+
+```{r}
+augment(qda_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+```
+
+```{r}
+qda_acc <- augment(qda_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+qda_acc
+```
+
+
 
 ### Question 8
 
 **Repeat Question 5**, but this time specify a naive Bayes model for classification using the `"klaR"` engine. Set the `usekernel` argument to `FALSE`.
 
+## Naive Bayes
+
+Finally, we'll fit a Naive Bayes model to the **training data**. For this, we will be using the `naive_bayes()` function to create the specification and set the `usekernel` argument to `FALSE`. This means that we are assuming that the predictors are drawn from Gaussian distributions.
+
 ```{r}
 
+nb_mod <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+
+nb_wkflow <- workflow() %>% 
+  add_model(nb_mod) %>% 
+  add_recipe(titanic_recipe)
+
+# nb_fit <- fit(nb_wkflow, titanic_train)
+
+nb_fit <- fit(nb_wkflow , data = titanic_train %>%  na.omit())
 ```
+
+
+### Assessing Performance
+
+And again:
+
+```{r}
+predict(nb_fit, new_data = titanic_train, type = "prob")
+```
+
+We can view a confidence matrix and calculate accuracy on the **training data**:
+
+```{r}
+augment(nb_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+```
+
+```{r}
+nb_acc <- augment(nb_fit, new_data = titanic_train) %>%
+  accuracy(truth = survived, estimate = .pred_class)
+nb_acc
+```
+
 
 ### Question 9
 
@@ -175,10 +364,19 @@ Use `predict()` and `bind_cols()` to generate predictions using each of these 4 
 
 Which model achieved the highest accuracy on the training data?
 
+## Comparing Model Performance
+
+Now we can make a table of the accuracy rates from these four models to choose the model that produced the highest accuracy on the training data:
+
 ```{r}
-
+accuracies <- c(log_reg_acc$.estimate, lda_acc$.estimate, 
+                nb_acc$.estimate, qda_acc$.estimate)
+models <- c("Logistic Regression", "LDA", "Naive Bayes", "QDA")
+results <- tibble(accuracies = round(accuracies,3), models = models)
+kableExtra::kable(
+  results %>%
+  arrange(-accuracies), caption ="The logistic regression model is the model that performed the best")
 ```
-
 
 ### Question 10
 
@@ -188,9 +386,33 @@ Again using the **testing** data, create a confusion matrix and visualize it. Pl
 
 How did the model perform? Compare its training and testing accuracies. If the values differ, why do you think this is so?
 
-```{r}
+## Fitting to Testing Data
 
+Since the Naive Bayes model performed slightly better, we'll go ahead and fit it to the testing data. In future weeks, we'll cover how to use cross-validation to try out different values for models' tuning parameters, but for now, this is a general overview of the process.
+
+```{r}
+predict(nb_fit, new_data = titanic_test, type = "prob")
 ```
+
+We can view the confusion matrix on the **testing** data:
+
+```{r}
+augment(nb_fit, new_data = titanic_test) %>%
+  conf_mat(truth = survived, estimate = .pred_class) 
+```
+
+We can also look at the **testing** accuracy. Here, we add two other metrics, sensitivity and specificity, out of curiosity:
+
+```{r}
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+
+augment(nb_fit, new_data = titanic_test) %>%
+  multi_metric(truth = survived, estimate = .pred_class)
+```
+
+
+
+
 
 
 ### Required for 231 Students
@@ -211,33 +433,35 @@ $$
 z(p)=ln\left(\frac{p}{1-p}\right)
 $$
 
-$$
+$$ 
 p(z)=\frac{e^z}{1+e^z} \\
 p({1+e^z}) = e^z \\
-p\cdot 1 + p\cdot e^z = e^z  \\
+p\cdot 1 + p\cdot e^z = e^z \\
 e^z - p\cdot e^z = p \\
 e^z \cdot (1-p) = p \\
 e^z = \frac{p}{1-p} \\
 z(p) = \log_e\left(\frac{p}{1-p}\right) \\
-z(p) = ln\left(\frac{p}{1-p}\right)
-
+z(p) = ln\left(\frac{p}{1-p}\right) 
 $$
-  
-
-
-
-
-
-
 
 ### Question 12
 
 Assume that $z = \beta_0 + \beta_{1}x_{1}$ and $p = logistic(z)$. How do the odds of the outcome change if you increase $x_{1}$ by two? Demonstrate this.
 
+Increasing `x` by a unit of 1 means multiply the odds by $e^_{B}$
+Therefore, if we increase if you increase $x_{1}$ by two we get :
+
+\$\$ $z = \beta_0 + \beta_{1}(x_{1}+2)$ \$\$
+\$\$ $z = \beta_0 + \beta_{1}x_{1}+ 2\beta_{1}$ \$\$
+
 Assume now that $\beta_1$ is negative. What value does $p$ approach as $x_{1}$ approaches $\infty$? What value does $p$ approach as $x_{1}$ approaches $-\infty$?
 
+(Lecture slide 12)
 
-```{r}
+As $x_{1}$ approaches $\infty$ p will approach 0
 
-```
+As $x_{1}$ approaches $-\infty$ p will approach 1
 
+References:
+
+Katie Coburn. (2022, April 18). *Course: PSTAT 131/PSTAT 231 - STAT MACHINE LEARN - Spring 2022*. <https://gauchospace.ucsb.edu/courses/course/view.php?id=16385>
